@@ -107,8 +107,10 @@ app.post("/api/goals/generate-plan", authMiddleware, async (req, res) => {
     console.error(error);
 
     res.status(500).json({
-      error: "AI generation failed",
-    });
+  error: "AI generation failed",
+  details: error.message,
+  status: error.status,
+});
   }
 });
 app.delete("/api/goals/:id", authMiddleware, async (req, res) => {
