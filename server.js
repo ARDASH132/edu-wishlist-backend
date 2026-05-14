@@ -257,6 +257,23 @@ app.post("/api/auth/login", async (req, res) => {
     });
   }
 });
+app.get("/api/users", async (req, res) => {
+  try {
+    const users = await prisma.user.findMany({
+      select: {
+        id: true,
+        email: true,
+        createdAt: true,
+      },
+    });
+
+    res.json(users);
+  } catch (error) {
+    res.status(500).json({
+      error: "Failed to fetch users",
+    });
+  }
+});
 app.listen(process.env.PORT, () => {
   console.log(`Server running on http://localhost:${process.env.PORT}`);
 });
