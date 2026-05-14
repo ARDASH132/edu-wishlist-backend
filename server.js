@@ -5,6 +5,7 @@ import OpenAI from "openai";
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
+
 dotenv.config();
 
 const app = express();
@@ -17,6 +18,7 @@ const client = new OpenAI({
   apiKey: process.env.OPENROUTER_API_KEY,
   baseURL: "https://openrouter.ai/api/v1",
 });
+
 function authMiddleware(req, res, next) {
   const authHeader = req.headers.authorization;
 
@@ -30,7 +32,9 @@ function authMiddleware(req, res, next) {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
     req.userId = decoded.userId;
+
     next();
   } catch {
     return res.status(401).json({
@@ -38,21 +42,26 @@ function authMiddleware(req, res, next) {
     });
   }
 }
+
 app.get("/", (req, res) => {
-  res.json({ message: "Edu Wishlist API is running" });
+  res.json({
+    message: "Edu Wishlist API is running",
+  });
 });
+
 app.get("/api/goals", authMiddleware, async (req, res) => {
   try {
     const goals = await prisma.goal.findMany({
-  where: {
-    userId: req.userId,
-  },
-  orderBy: {
-    createdAt: "desc",
-  },
-});
+      where: {
+        userId: req.userId,
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
 
     res.json(goals);
+
   } catch (error) {
     console.error(error);
 
@@ -74,49 +83,60 @@ app.post("/api/goals/generate-plan", authMiddleware, async (req, res) => {
 
     const response = await client.chat.completions.create({
       model: "deepseek/deepseek-chat",
-      response_format: { type: "json_object" },
+
+      response_format: {
+        type: "json_object",
+      },
+
       extra_headers: {
         "HTTP-Referer": "http://localhost:3000",
         "X-Title": "Edu Wishlist MVP",
       },
+
       messages: [
         {
           role: "system",
+
           content: `
 Ты — AI-помощник образовательного вишлиста.
 
 Пользователь пишет учебную цель или желание.
-Твоя задача — превратить её в понятный пошаговый план.
+Твоя задача — превратить её в понятный пошаговый учебный план.
 
 ОЧЕНЬ ВАЖНО:
 - Отвечай только валидным JSON.
 - Не пиши текст до JSON или после JSON.
 - Не используй markdown.
 - Не используй \`\`\`json.
+- Все строки должны быть на русском языке.
 
 Верни JSON строго в таком формате:
 
 {
-  "wish_title": "Краткое название цели",
-  "category": "Категория",
+  "wish_title": "Краткое красивое название цели",
+  "category": "Короткая категория",
+  "cover_icon": "🔥",
   "steps": [
-    "Шаг 1",
-    "Шаг 2",
-    "Шаг 3"
-  ],
-  "cover_icon": "🔥"
+    {
+      "title": "Короткое конкретное действие",
+      "details": "Подробное объяснение, что именно нужно изучить или сделать"
+    }
+  ]
 }
 
 Правила:
 - steps: от 3 до 7 шагов.
-- Каждый шаг должен быть коротким, конкретным и практическим.
-- Каждый шаг должен быть таким, чтобы на него можно было поставить галочку.
-- Не указывай длительность.
+- Каждый steps.title должен быть коротким, конкретным и подходить для чекбокса.
+- Каждый steps.details должен объяснять этот шаг простыми словами.
+- Не указывай длительность в title.
+- В details можно дать примеры, что именно изучить.
+- Не используй слишком общие шаги вроде "Практиковаться больше".
 - category должна быть короткой.
-- cover_icon должен быть одним подходящим эмодзи.
-- wish_title должен звучать красиво и понятно.
-`
+- cover_icon должен быть одним эмодзи.
+- wish_title должен быть понятным и привлекательным.
+          `,
         },
+
         {
           role: "user",
           content: `Моя учебная цель: ${goal}`,
@@ -124,43 +144,28 @@ app.post("/api/goals/generate-plan", authMiddleware, async (req, res) => {
       ],
     });
 
+    const aiContent =
+      response.choices[0].message.content;
+
     const savedGoal = await prisma.goal.create({
-  data: {
-    title: goal,
-    plan: response.choices[0].message.content,
-    userId: req.userId,
-  },
-});
+      data: {
+        title: goal,
+        plan: aiContent,
+        userId: req.userId,
+      },
+    });
+
     res.json(savedGoal);
+
   } catch (error) {
     console.error(error);
 
     res.status(500).json({
-  error: "AI generation failed",
-  details: error.message,
-  status: error.status,
-});
-  }
-});
-app.delete("/api/goals/:id", authMiddleware, async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    await prisma.goal.delete({
-      where: { id },
-    });
-
-    res.json({
-      message: "Goal deleted successfully",
-    });
-  } catch (error) {
-    console.error(error);
-
-    res.status(500).json({
-      error: "Failed to delete goal",
+      error: "AI generation failed",
     });
   }
 });
+
 app.get("/api/goals/:id", authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
@@ -175,7 +180,14 @@ app.get("/api/goals/:id", authMiddleware, async (req, res) => {
       });
     }
 
+    if (goal.userId !== req.userId) {
+      return res.status(403).json({
+        error: "Access denied",
+      });
+    }
+
     res.json(goal);
+
   } catch (error) {
     console.error(error);
 
@@ -184,15 +196,48 @@ app.get("/api/goals/:id", authMiddleware, async (req, res) => {
     });
   }
 });
+
+app.delete("/api/goals/:id", authMiddleware, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const goal = await prisma.goal.findUnique({
+      where: { id },
+    });
+
+    if (!goal || goal.userId !== req.userId) {
+      return res.status(403).json({
+        error: "Access denied",
+      });
+    }
+
+    await prisma.goal.delete({
+      where: { id },
+    });
+
+    res.json({
+      message: "Goal deleted successfully",
+    });
+
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      error: "Failed to delete goal",
+    });
+  }
+});
+
 app.post("/api/auth/register", async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    const existingUser = await prisma.user.findUnique({
-      where: {
-        email,
-      },
-    });
+    const existingUser =
+      await prisma.user.findUnique({
+        where: {
+          email,
+        },
+      });
 
     if (existingUser) {
       return res.status(400).json({
@@ -200,7 +245,8 @@ app.post("/api/auth/register", async (req, res) => {
       });
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const hashedPassword =
+      await bcrypt.hash(password, 10);
 
     const user = await prisma.user.create({
       data: {
@@ -213,7 +259,9 @@ app.post("/api/auth/register", async (req, res) => {
       {
         userId: user.id,
       },
+
       process.env.JWT_SECRET,
+
       {
         expiresIn: "7d",
       }
@@ -221,11 +269,13 @@ app.post("/api/auth/register", async (req, res) => {
 
     res.json({
       token,
+
       user: {
         id: user.id,
         email: user.email,
       },
     });
+
   } catch (error) {
     console.error(error);
 
@@ -234,6 +284,7 @@ app.post("/api/auth/register", async (req, res) => {
     });
   }
 });
+
 app.post("/api/auth/login", async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -250,10 +301,11 @@ app.post("/api/auth/login", async (req, res) => {
       });
     }
 
-    const isPasswordCorrect = await bcrypt.compare(
-      password,
-      user.password
-    );
+    const isPasswordCorrect =
+      await bcrypt.compare(
+        password,
+        user.password
+      );
 
     if (!isPasswordCorrect) {
       return res.status(400).json({
@@ -265,7 +317,9 @@ app.post("/api/auth/login", async (req, res) => {
       {
         userId: user.id,
       },
+
       process.env.JWT_SECRET,
+
       {
         expiresIn: "7d",
       }
@@ -273,11 +327,13 @@ app.post("/api/auth/login", async (req, res) => {
 
     res.json({
       token,
+
       user: {
         id: user.id,
         email: user.email,
       },
     });
+
   } catch (error) {
     console.error(error);
 
@@ -286,6 +342,7 @@ app.post("/api/auth/login", async (req, res) => {
     });
   }
 });
+
 app.get("/api/users", async (req, res) => {
   try {
     const users = await prisma.user.findMany({
@@ -297,12 +354,16 @@ app.get("/api/users", async (req, res) => {
     });
 
     res.json(users);
-  } catch (error) {
+
+  } catch {
     res.status(500).json({
       error: "Failed to fetch users",
     });
   }
 });
+
 app.listen(process.env.PORT, () => {
-  console.log(`Server running on http://localhost:${process.env.PORT}`);
+  console.log(
+    `Server running on http://localhost:${process.env.PORT}`
+  );
 });
